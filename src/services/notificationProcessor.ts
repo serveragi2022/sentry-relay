@@ -1,48 +1,64 @@
-import { useAppStore, ensureStoreHydrated } from '@/store/useAppStore';
-import { deliverToWebhook } from '@/services/webhookForwarder';
-import type { ForwardedEvent, RawAndroidNotification } from '@/types';
+import { useAppStore, ensureStoreHydrated } from "@/store/useAppStore";
+import { deliverToWebhook } from "@/services/webhookForwarder";
+import type { ForwardedEvent, RawAndroidNotification } from "@/types";
 
 const RETRY_DELAYS_MS = [2000, 5000, 10000]; // attempt 1, 2, 3
 
 /** Masks digit runs that look like phone numbers, keeping only the last 2 digits visible. */
 function maskPhoneNumbers(input: string): string {
   return input.replace(/(\+?\d[\d\s-]{6,}\d)/g, (match) => {
-    const digitsOnly = match.replace(/\D/g, '');
+    const digitsOnly = match.replace(/\D/g, "");
     const visible = digitsOnly.slice(-2);
-    return `${'X'.repeat(Math.max(digitsOnly.length - 2, 3))} ${visible}`.trim();
+    return `${"X".repeat(Math.max(digitsOnly.length - 2, 3))} ${visible}`.trim();
   });
 }
 
-function buildDisplayText(rawText: string, showContentInHistory: boolean): string {
+function buildDisplayText(
+  rawText: string,
+  showContentInHistory: boolean,
+): string {
   if (showContentInHistory) return rawText;
   const masked = maskPhoneNumbers(rawText);
   // If nothing looked like a phone number, still avoid storing raw message
   // bodies in plaintext history when the privacy toggle is off.
-  return masked === rawText ? '[Content masked — enable "Show Notification Content" to view]' : masked;
+  return masked === rawText
+    ? '[Content masked — enable "Show Notification Content" to view]'
+    : masked;
 }
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function attemptDelivery(eventId: string, rawText: string, rawTitle: string): Promise<void> {
-  for (let attemptIndex = 0; attemptIndex < RETRY_DELAYS_MS.length; attemptIndex++) {
+async function attemptDelivery(
+  eventId: string,
+  rawText: string,
+  rawTitle: string,
+): Promise<void> {
+  for (
+    let attemptIndex = 0;
+    attemptIndex < RETRY_DELAYS_MS.length;
+    attemptIndex++
+  ) {
     const { settings, updateEvent, events } = useAppStore.getState();
     const current = events.find((e) => e.id === eventId);
-    if (!current || current.status === 'forwarded') return;
+    if (!current || current.status === "forwarded") return;
 
     const attemptNumber = attemptIndex + 1;
-    updateEvent(eventId, { attempts: attemptNumber, lastAttemptAt: Date.now() });
+    updateEvent(eventId, {
+      attempts: attemptNumber,
+      lastAttemptAt: Date.now(),
+    });
 
     const result = await deliverToWebhook(
       { ...current, title: rawTitle, text: rawText },
       settings.webhookUrl,
-      settings.webhookSecret
+      settings.webhookSecret,
     );
 
     if (result.success) {
       updateEvent(eventId, {
-        status: 'forwarded',
+        status: "forwarded",
         lastHttpStatus: result.httpStatus,
         lastResponseBody: result.responseBody,
         lastError: undefined,
@@ -51,7 +67,7 @@ async function attemptDelivery(eventId: string, rawText: string, rawTitle: strin
     }
 
     updateEvent(eventId, {
-      status: attemptNumber >= RETRY_DELAYS_MS.length ? 'failed' : 'queued',
+      status: attemptNumber >= RETRY_DELAYS_MS.length ? "failed" : "queued",
       lastHttpStatus: result.httpStatus,
       lastResponseBody: result.responseBody,
       lastError: result.error,
@@ -68,7 +84,9 @@ async function attemptDelivery(eventId: string, rawText: string, rawTitle: strin
  * RNAndroidNotificationListenerHeadlessJsName. Must resolve its promise —
  * Android will kill the task if it hangs.
  */
-export async function handleIncomingNotification(payload: { notification?: string }): Promise<void> {
+export async function handleIncomingNotification(payload: {
+  notification?: string;
+}): Promise<void> {
   if (!payload?.notification) return;
 
   await ensureStoreHydrated();
@@ -84,10 +102,28 @@ export async function handleIncomingNotification(payload: { notification?: strin
   if (!settings.forwardingEnabled) return;
 
   const source = sources.find((s) => s.packageName === raw.app);
-  if (!source || !source.enabled) return; // not an authorized source — discard silently
+  if (!source || !source.enabled) return;
 
-  const rawText = raw.bigText || raw.text || raw.summaryText || '';
-  const rawTitle = raw.titleBig || raw.title || '';
+  // Skip group-summary notifications (no bigText/text of their own)
+  if (!raw.bigText && !raw.text) {
+    return;
+  }
+
+  // Skip Viber's transient progress notifications (media send/receive
+  // in progress) — not actual messages, just loading indicators.
+  const TRANSIENT_TITLES = [
+    "Sending media",
+    "Downloading media",
+    "Sending...",
+    "Uploading...",
+  ];
+  const titleCandidate = raw.titleBig || raw.title || "";
+  if (TRANSIENT_TITLES.includes(titleCandidate.trim())) {
+    return;
+  }
+
+  const rawText = raw.bigText || raw.text || "";
+  const rawTitle = raw.titleBig || raw.title || "";
   const showContent = settings.showContentInHistory;
 
   const event: ForwardedEvent = {
@@ -100,14 +136,17 @@ export async function handleIncomingNotification(payload: { notification?: strin
     receivedAt: Date.now(),
     attempts: 0,
     maxAttempts: RETRY_DELAYS_MS.length,
-    status: 'queued',
+    status: "queued",
     sanitized: !showContent,
   };
 
   addEvent(event);
 
-  // Delivery always uses the raw, unmasked text — the webhook is the user's
-  // own configured endpoint, and masking exists for the local history view,
-  // not to withhold data from the destination the user explicitly set up.
-  await attemptDelivery(event.id, rawText, rawTitle);
+  // Fire-and-forget: resolve the headless task immediately so Android
+  // doesn't serialize/queue subsequent notification captures behind this
+  // one's retry delays. Delivery (and its retries) runs independently,
+  // updating the event's status via the store as it progresses.
+  attemptDelivery(event.id, rawText, rawTitle).catch(() => {
+    // errors are already recorded inside attemptDelivery via updateEvent
+  });
 }
