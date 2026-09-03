@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, ScrollView, TextInput, StyleSheet, Alert, Pressable } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, Text, ScrollView, TextInput, StyleSheet, Alert, Pressable, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radii, spacing, typography } from '@/theme';
 import { Card } from '@/components/Card';
@@ -9,6 +9,10 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { SectionLabel } from '@/components/SectionLabel';
 import { useAppStore } from '@/store/useAppStore';
 import { checkNotificationPermission, openNotificationAccessSettings } from '@/services/permissions';
+import {
+  isIgnoringBatteryOptimizations,
+  requestIgnoreBatteryOptimizations,
+} from '@/services/relayNative';
 import type { RetentionDays } from '@/types';
 
 const RETENTION_OPTIONS: { value: RetentionDays; label: string }[] = [
@@ -30,6 +34,19 @@ export function SettingsScreen() {
   const [webhookDraft, setWebhookDraft] = useState(settings.webhookUrl);
   const [secretDraft, setSecretDraft] = useState(settings.webhookSecret);
   const [retentionOpen, setRetentionOpen] = useState(false);
+  const [batteryExempt, setBatteryExempt] = useState<boolean | null>(null);
+
+  const refreshBatteryStatus = useCallback(async () => {
+    setBatteryExempt(await isIgnoringBatteryOptimizations());
+  }, []);
+
+  useEffect(() => {
+    refreshBatteryStatus();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshBatteryStatus();
+    });
+    return () => sub.remove();
+  }, [refreshBatteryStatus]);
 
   async function refreshPermission() {
     const status = await checkNotificationPermission();
@@ -91,6 +108,31 @@ export function SettingsScreen() {
               openNotificationAccessSettings();
               // Give the user a moment in system settings before re-checking.
               setTimeout(refreshPermission, 1500);
+            }}
+          />
+        </Card>
+
+        <View style={{ height: spacing.sm }} />
+
+        <Card style={{ borderLeftWidth: 3, borderLeftColor: colors.secondary }}>
+          <View style={styles.permHeaderRow}>
+            <Text style={[typography.bodyLg, styles.permTitle]}>Background Monitoring</Text>
+            <StatusBadge
+              label={batteryExempt ? 'Exempted' : 'Not Exempted'}
+              kind={batteryExempt ? 'connected' : 'error'}
+            />
+          </View>
+          <Text style={[typography.bodySm, styles.permDescription]}>
+            A foreground-service notification keeps this app running so notifications aren't
+            missed, but some phones (Xiaomi, Oppo, Vivo, and similar) still kill background apps
+            unless you exempt this one from battery optimization.
+          </Text>
+          <PrimaryButton
+            label={batteryExempt ? 'Exemption Active' : 'Exempt From Battery Optimization'}
+            variant="outlined"
+            onPress={() => {
+              requestIgnoreBatteryOptimizations();
+              setTimeout(refreshBatteryStatus, 1500);
             }}
           />
         </Card>

@@ -23,9 +23,13 @@ function withNotificationListener(config) {
     application['$']['android:allowBackup'] =
       application['$']['android:allowBackup'] || 'true';
 
-    application['$']['tools:replace'] = application['$']['tools:replace']
-      ? `${application['$']['tools:replace']},android:allowBackup`
-      : 'android:allowBackup';
+    const existingReplace = application['$']['tools:replace']
+      ? application['$']['tools:replace'].split(',').map((s) => s.trim())
+      : [];
+    if (!existingReplace.includes('android:allowBackup')) {
+      existingReplace.push('android:allowBackup');
+    }
+    application['$']['tools:replace'] = existingReplace.join(',');
 
     return config;
   });

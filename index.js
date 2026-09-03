@@ -2,7 +2,7 @@ import { registerRootComponent } from 'expo';
 import { AppRegistry } from 'react-native';
 import { RNAndroidNotificationListenerHeadlessJsName } from 'react-native-android-notification-listener';
 import App from './App';
-import { handleIncomingNotification } from './src/services/notificationProcessor';
+import { handleIncomingNotification, retryDeliveryTask } from './src/services/notificationProcessor';
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App),
 // and wraps it so Expo Go / dev builds behave the same as a bare RN app.
@@ -22,3 +22,13 @@ AppRegistry.registerHeadlessTask(
   RNAndroidNotificationListenerHeadlessJsName,
   () => handleIncomingNotification
 );
+
+/**
+ * Registers the retry headless task. Invoked by the native `RetryTaskService`
+ * whenever a WorkManager-scheduled retry job fires (see
+ * plugins/withForegroundService.js / src/services/relayNative.ts). Unlike a
+ * plain setTimeout loop, WorkManager persists this schedule across process
+ * death, so a retry that was due while the app was killed in the background
+ * still runs once Android wakes the process back up.
+ */
+AppRegistry.registerHeadlessTask('RetryDeliveryTask', () => retryDeliveryTask);

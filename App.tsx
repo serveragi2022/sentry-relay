@@ -16,6 +16,7 @@ import {
 import { RootNavigator } from '@/navigation/RootNavigator';
 import { useAppStore } from '@/store/useAppStore';
 import { checkNotificationPermission } from '@/services/permissions';
+import { startForegroundMonitoring, stopForegroundMonitoring } from '@/services/relayNative';
 import { colors } from '@/theme';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -30,6 +31,8 @@ export default function App() {
   });
   const setPermissionStatus = useAppStore((s) => s.setPermissionStatus);
   const purgeExpired = useAppStore((s) => s.purgeExpired);
+  const permissionStatus = useAppStore((s) => s.permissionStatus);
+  const forwardingEnabled = useAppStore((s) => s.settings.forwardingEnabled);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -53,6 +56,21 @@ export default function App() {
     });
     return () => sub.remove();
   }, []);
+
+  // Keep the foreground service running exactly while monitoring is
+  // actually meaningful: notification access granted AND forwarding not
+  // switched off via the master kill switch. This is what keeps the
+  // process (and the notification listener binding) alive under
+  // aggressive OEM battery managers when the app is idle in the
+  // background.
+  useEffect(() => {
+    if (!ready) return;
+    if (permissionStatus === 'authorized' && forwardingEnabled) {
+      startForegroundMonitoring();
+    } else {
+      stopForegroundMonitoring();
+    }
+  }, [ready, permissionStatus, forwardingEnabled]);
 
   const onLayout = useCallback(async () => {
     if (fontsLoaded && ready) {

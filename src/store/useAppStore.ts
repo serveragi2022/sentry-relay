@@ -24,12 +24,33 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 const MAX_STORED_EVENTS = 500;
 
+/** How long a given dedup key is remembered before the same key is treated
+ * as a genuinely new notification rather than a re-post of the same one
+ * (e.g. Android re-delivering a notification when it's marked "seen" or
+ * edited in place). */
+const DEDUP_WINDOW_MS = 4000;
+const MAX_DEDUP_KEYS = 200;
+
+/** Grouped-conversation notifications (see groupMessageKeys below) repost the
+ * SAME cumulative bundle every time a new message arrives — e.g. message A
+ * alone, then [A, B], then [A, B, C]. A's key must stay "seen" across that
+ * whole span, which can be minutes long, so this list has no time window —
+ * only a size cap with FIFO eviction. */
+const MAX_GROUP_MESSAGE_KEYS = 400;
+
+interface DedupEntry {
+  key: string;
+  ts: number;
+}
+
 interface AppState {
   hasHydrated: boolean;
   permissionStatus: PermissionStatus;
   settings: AppSettings;
   sources: NotificationSource[];
   events: ForwardedEvent[];
+  dedupKeys: DedupEntry[];
+  groupMessageKeys: string[];
 
   setHasHydrated: (value: boolean) => void;
   setPermissionStatus: (status: PermissionStatus) => void;
@@ -41,6 +62,16 @@ interface AppState {
   updateEvent: (id: string, patch: Partial<ForwardedEvent>) => void;
   clearHistory: () => void;
   purgeExpired: () => void;
+
+  /** Returns true if `key` has NOT been seen within the dedup window (i.e.
+   * this notification should be processed), and records it either way. */
+  claimDedupKey: (key: string) => boolean;
+
+  /** Same idea as claimDedupKey but for individual messages inside a grouped
+   * conversation notification — permanent (capped, not time-windowed), since
+   * the same bundle is re-posted for as long as the conversation stays
+   * active. Returns true the first time a given message key is seen. */
+  claimGroupMessageKey: (key: string) => boolean;
 }
 
 export const useAppStore = create<AppState>()(
@@ -51,6 +82,8 @@ export const useAppStore = create<AppState>()(
       settings: DEFAULT_SETTINGS,
       sources: DEFAULT_SOURCES,
       events: [],
+      dedupKeys: [],
+      groupMessageKeys: [],
 
       setHasHydrated: (value) => set({ hasHydrated: value }),
 
@@ -93,6 +126,24 @@ export const useAppStore = create<AppState>()(
         const kept = events.filter((e) => e.receivedAt >= cutoff);
         if (kept.length !== events.length) set({ events: kept });
       },
+
+      claimDedupKey: (key) => {
+        const now = Date.now();
+        const { dedupKeys } = get();
+        const pruned = dedupKeys.filter((e) => now - e.ts < DEDUP_WINDOW_MS);
+        const isDuplicate = pruned.some((e) => e.key === key);
+        const next = [...pruned, { key, ts: now }].slice(-MAX_DEDUP_KEYS);
+        set({ dedupKeys: next });
+        return !isDuplicate;
+      },
+
+      claimGroupMessageKey: (key) => {
+        const { groupMessageKeys } = get();
+        if (groupMessageKeys.includes(key)) return false;
+        const next = [...groupMessageKeys, key].slice(-MAX_GROUP_MESSAGE_KEYS);
+        set({ groupMessageKeys: next });
+        return true;
+      },
     }),
     {
       name: 'sentry-relay-store',
@@ -101,6 +152,8 @@ export const useAppStore = create<AppState>()(
         settings: state.settings,
         sources: state.sources,
         events: state.events,
+        dedupKeys: state.dedupKeys,
+        groupMessageKeys: state.groupMessageKeys,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);

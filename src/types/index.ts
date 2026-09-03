@@ -16,6 +16,12 @@ export interface ForwardedEvent {
   appLabel: string;
   title: string;
   text: string;
+  /** Unmasked title/text, kept only until the event reaches a terminal
+   * delivery state, so a WorkManager-driven retry (which may run after the
+   * JS process has been killed and restarted) still has the real content
+   * to send — the display fields above may already be phone-number-masked. */
+  deliveryTitle?: string;
+  deliveryText?: string;
   rawTextLength: number;
   receivedAt: number;
   lastAttemptAt?: number;
@@ -55,4 +61,7 @@ export interface RawAndroidNotification {
   bigText?: string;
   extraInfoText?: string;
   groupedMessages?: Array<{ title: string; text: string }>;
+  /** Android's NotificationListenerService `StatusBarNotification.key` — stable
+   * per-notification identity the OS itself uses, when the library surfaces it. */
+  key?: string;
 }

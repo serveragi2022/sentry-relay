@@ -37,8 +37,10 @@ export async function deliverToWebhook(
         id: event.id,
         app: event.appLabel,
         package: event.packageName,
-        title: event.title,
-        text: event.text,
+        // Always the unmasked capture, not the (possibly masked) display
+        // fields — masking is a local-history-only concern (see README).
+        title: event.deliveryTitle ?? event.title,
+        text: event.deliveryText ?? event.text,
         received_at: new Date(event.receivedAt).toISOString(),
         sanitized: event.sanitized,
       }),

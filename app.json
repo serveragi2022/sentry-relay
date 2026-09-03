@@ -17,13 +17,18 @@
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
         "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+        "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+        "android.permission.WAKE_LOCK",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "plugins": [
       "expo-font",
-      "./plugins/withNotificationListener.js"
+      "./plugins/withNotificationListener.js",
+      "./plugins/withForegroundService.js"
     ]
   }
 }
