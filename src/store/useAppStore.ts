@@ -38,6 +38,15 @@ const MAX_DEDUP_KEYS = 200;
  * only a size cap with FIFO eviction. */
 const MAX_GROUP_MESSAGE_KEYS = 400;
 
+/** Same permanent-dedup idea, but for the OS-assigned notification key
+ * (`StatusBarNotification.key`) on non-grouped notifications. Android can
+ * repost the exact same notification instance many times while it stays
+ * unread — sometimes minutes apart — and every repost carries the same
+ * key. A time-windowed check would let a late repost through as if it were
+ * a new message, so once a given key has been claimed it stays claimed for
+ * the life of this capped list. */
+const MAX_NOTIFICATION_KEYS = 500;
+
 interface DedupEntry {
   key: string;
   ts: number;
@@ -51,6 +60,7 @@ interface AppState {
   events: ForwardedEvent[];
   dedupKeys: DedupEntry[];
   groupMessageKeys: string[];
+  notificationKeys: string[];
 
   setHasHydrated: (value: boolean) => void;
   setPermissionStatus: (status: PermissionStatus) => void;
@@ -64,7 +74,9 @@ interface AppState {
   purgeExpired: () => void;
 
   /** Returns true if `key` has NOT been seen within the dedup window (i.e.
-   * this notification should be processed), and records it either way. */
+   * this notification should be processed), and records it either way.
+   * Used only as a fallback for payloads without an OS notification key —
+   * see claimNotificationKey for the normal, permanent case. */
   claimDedupKey: (key: string) => boolean;
 
   /** Same idea as claimDedupKey but for individual messages inside a grouped
@@ -72,6 +84,12 @@ interface AppState {
    * the same bundle is re-posted for as long as the conversation stays
    * active. Returns true the first time a given message key is seen. */
   claimGroupMessageKey: (key: string) => boolean;
+
+  /** Permanent (capped, not time-windowed) dedup for a single notification's
+   * OS-assigned key. Returns true the first time a given key is seen —
+   * every repost of that same notification (e.g. while it's still unread)
+   * returns false from then on. */
+  claimNotificationKey: (key: string) => boolean;
 }
 
 export const useAppStore = create<AppState>()(
@@ -84,6 +102,7 @@ export const useAppStore = create<AppState>()(
       events: [],
       dedupKeys: [],
       groupMessageKeys: [],
+      notificationKeys: [],
 
       setHasHydrated: (value) => set({ hasHydrated: value }),
 
@@ -144,6 +163,14 @@ export const useAppStore = create<AppState>()(
         set({ groupMessageKeys: next });
         return true;
       },
+
+      claimNotificationKey: (key) => {
+        const { notificationKeys } = get();
+        if (notificationKeys.includes(key)) return false;
+        const next = [...notificationKeys, key].slice(-MAX_NOTIFICATION_KEYS);
+        set({ notificationKeys: next });
+        return true;
+      },
     }),
     {
       name: 'sentry-relay-store',
@@ -154,6 +181,7 @@ export const useAppStore = create<AppState>()(
         events: state.events,
         dedupKeys: state.dedupKeys,
         groupMessageKeys: state.groupMessageKeys,
+        notificationKeys: state.notificationKeys,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);

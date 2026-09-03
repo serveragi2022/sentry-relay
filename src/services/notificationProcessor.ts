@@ -19,6 +19,23 @@ function maskPhoneNumbers(input: string): string {
   });
 }
 
+/**
+ * Android's grouped/MessagingStyle notifications for group chats (Viber
+ * "External Audit Viber Group", "Kaizen Department", etc.) surface a
+ * synthetic conversation-subtitle line alongside the real messages —
+ * literally "from <sender>, <group name>". It's UI metadata describing
+ * *where* the message came from, not a message itself, and it always
+ * repeats the exact same sender name that's already the display title.
+ * Detect that specific shape and drop it so it never gets logged or
+ * forwarded as if it were real chat content.
+ */
+function isConversationSubtitleArtifact(title: string, text: string): boolean {
+  const match = /^from\s+([^,]+),\s*.+$/i.exec(text.trim());
+  if (!match) return false;
+  const fromName = match[1].trim().toLowerCase();
+  return fromName === title.trim().toLowerCase();
+}
+
 function buildDisplayText(
   rawText: string,
   showContentInHistory: boolean,
@@ -133,7 +150,8 @@ export async function handleIncomingNotification(payload: {
     return; // malformed payload, nothing to do
   }
 
-  const { settings, sources, addEvent, claimDedupKey, claimGroupMessageKey } = useAppStore.getState();
+  const { settings, sources, addEvent, claimDedupKey, claimGroupMessageKey, claimNotificationKey } =
+    useAppStore.getState();
   if (!settings.forwardingEnabled) return;
 
   const source = sources.find((s) => s.packageName === raw.app);
@@ -178,6 +196,7 @@ export async function handleIncomingNotification(payload: {
       const gmTitle = gm.title || raw.titleBig || raw.title || "";
       const gmText = gm.text || "";
       if (!gmText) continue;
+      if (isConversationSubtitleArtifact(gmTitle, gmText)) continue;
 
       // Permanent (non-expiring) dedup: the OS reposts the SAME cumulative
       // bundle every time a new message arrives in the conversation, so a
@@ -213,12 +232,21 @@ export async function handleIncomingNotification(payload: {
   const rawText = raw.bigText || raw.text || "";
   const rawTitle = raw.titleBig || raw.title || "";
 
+  // Same conversation-subtitle artifact as above, for the non-grouped path.
+  if (isConversationSubtitleArtifact(rawTitle, rawText)) {
+    return;
+  }
+
   // Duplicate detection: NotificationListenerService commonly re-posts the
   // same notification (same OS key) when it's updated in place — marked
-  // seen/read, edited, or a group summary refresh. Without this check each
-  // re-post would queue and forward again as if it were a new message.
+  // seen/read, edited, or a group summary refresh — and can keep doing so
+  // for as long as the notification stays unread, sometimes minutes apart.
+  // When we have a real OS key, dedup on it permanently (see
+  // claimNotificationKey); only fall back to the short time-windowed check
+  // for older payload shapes that don't include `key`.
   const dedupKey = buildDedupKey(raw, rawTitle, rawText);
-  if (!claimDedupKey(dedupKey)) {
+  const isDuplicate = raw.key ? !claimNotificationKey(dedupKey) : !claimDedupKey(dedupKey);
+  if (isDuplicate) {
     return;
   }
 

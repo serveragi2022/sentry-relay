@@ -8,6 +8,7 @@ import { PipelineTracker } from '@/components/PipelineTracker';
 import { ToggleRow } from '@/components/ToggleRow';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAppStore } from '@/store/useAppStore';
+import { useAdminStore } from '@/store/useAdminStore';
 import { testWebhook } from '@/services/webhookForwarder';
 import { openNotificationAccessSettings } from '@/services/permissions';
 import { maskWebhookUrl } from '@/utils/format';
@@ -18,6 +19,7 @@ export function DashboardScreen({ navigation }: any) {
   const sources = useAppStore((s) => s.sources);
   const events = useAppStore((s) => s.events);
   const toggleSource = useAppStore((s) => s.toggleSource);
+  const requireAdmin = useAdminStore((s) => s.requireAdmin);
   const [testing, setTesting] = useState(false);
 
   const forwardedToday = useMemo(() => {
@@ -127,7 +129,9 @@ export function DashboardScreen({ navigation }: any) {
             <ToggleRow
               title=""
               value={source.enabled}
-              onValueChange={() => toggleSource(source.packageName)}
+              onValueChange={() =>
+                requireAdmin(() => toggleSource(source.packageName))
+              }
             />
           </Card>
         ))}
@@ -158,7 +162,7 @@ export function DashboardScreen({ navigation }: any) {
           <View style={styles.actionRow}>
             <PrimaryButton
               label="Test Webhook"
-              onPress={handleTestWebhook}
+              onPress={() => requireAdmin(handleTestWebhook)}
               loading={testing}
               style={{ flex: 1 }}
             />
@@ -166,7 +170,7 @@ export function DashboardScreen({ navigation }: any) {
             <PrimaryButton
               label="Configure"
               variant="outlined"
-              onPress={() => navigation.navigate('Settings')}
+              onPress={() => requireAdmin(() => navigation.navigate('Settings'))}
               style={{ flex: 1 }}
             />
           </View>

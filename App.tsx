@@ -18,6 +18,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { checkNotificationPermission } from '@/services/permissions';
 import { startForegroundMonitoring, stopForegroundMonitoring } from '@/services/relayNative';
 import { colors } from '@/theme';
+import { AdminLoginModal } from '@/components/AdminLoginModal';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -87,6 +88,7 @@ export default function App() {
       <View style={{ flex: 1 }} onLayout={onLayout}>
         <StatusBar style="dark" />
         <RootNavigator />
+        <AdminLoginModal />
       </View>
     </SafeAreaProvider>
   );

@@ -8,6 +8,7 @@ import { ToggleRow } from '@/components/ToggleRow';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { SectionLabel } from '@/components/SectionLabel';
 import { useAppStore } from '@/store/useAppStore';
+import { useAdminStore } from '@/store/useAdminStore';
 import { checkNotificationPermission, openNotificationAccessSettings } from '@/services/permissions';
 import {
   isIgnoringBatteryOptimizations,
@@ -31,10 +32,22 @@ export function SettingsScreen() {
   const toggleSource = useAppStore((s) => s.toggleSource);
   const clearHistory = useAppStore((s) => s.clearHistory);
 
+  const isAdminUnlocked = useAdminStore((s) => s.isUnlocked);
+  const requireAdmin = useAdminStore((s) => s.requireAdmin);
+  const lockAdmin = useAdminStore((s) => s.lock);
+
   const [webhookDraft, setWebhookDraft] = useState(settings.webhookUrl);
   const [secretDraft, setSecretDraft] = useState(settings.webhookSecret);
   const [retentionOpen, setRetentionOpen] = useState(false);
   const [batteryExempt, setBatteryExempt] = useState<boolean | null>(null);
+
+  // The whole Settings screen is admin-gated: prompt for login the moment
+  // this screen is focused if we're not unlocked yet for this session.
+  useEffect(() => {
+    if (!isAdminUnlocked) {
+      requireAdmin(() => {});
+    }
+  }, [isAdminUnlocked]);
 
   const refreshBatteryStatus = useCallback(async () => {
     setBatteryExempt(await isIgnoringBatteryOptimizations());
@@ -54,19 +67,47 @@ export function SettingsScreen() {
   }
 
   function handleClearHistory() {
-    Alert.alert(
-      'Clear all local history?',
-      'This purges every cached event log and webhook transaction record on this device.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear', style: 'destructive', onPress: clearHistory },
-      ]
+    requireAdmin(() => {
+      Alert.alert(
+        'Clear all local history?',
+        'This purges every cached event log and webhook transaction record on this device.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Clear', style: 'destructive', onPress: clearHistory },
+        ]
+      );
+    });
+  }
+
+  // Not unlocked yet: show only a lock screen, nothing else in Settings
+  // (sources, toggles, webhook fields, clear-history) renders until login
+  // succeeds.
+  if (!isAdminUnlocked) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.lockedContainer}>
+          <Text style={[typography.headlineMd, { color: colors.textPrimary }]}>
+            Admin Login Required
+          </Text>
+          <Text style={[typography.bodyMd, styles.lockedHint]}>
+            Settings, notification sources, webhook testing/configuration, and deleting stored
+            event data are admin-only.
+          </Text>
+          <View style={{ height: spacing.md }} />
+          <PrimaryButton label="Log In" onPress={() => requireAdmin(() => {})} />
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <Text style={[typography.headlineMd, styles.title]}>Permissions & Privacy</Text>
+      <View style={styles.titleRow}>
+        <Text style={[typography.headlineMd, styles.title]}>Permissions & Privacy</Text>
+        <Pressable onPress={lockAdmin} style={styles.lockButton}>
+          <Text style={[typography.labelMd, { color: colors.textSecondary }]}>LOCK</Text>
+        </Pressable>
+      </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <Card style={styles.privacyCard}>
@@ -262,7 +303,28 @@ export function SettingsScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
-  title: { color: colors.textPrimary, paddingHorizontal: spacing.md, paddingTop: spacing.sm },
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+  },
+  title: { color: colors.textPrimary },
+  lockButton: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  lockedContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+  },
+  lockedHint: { color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm },
   scroll: { padding: spacing.md },
   privacyCard: { backgroundColor: colors.surfaceHigh, borderColor: colors.border },
   privacyHeaderRow: {
