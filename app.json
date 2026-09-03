@@ -23,8 +23,7 @@
     },
     "plugins": [
       "expo-font",
-      "./plugins/withNotificationListener.js",
-      "./plugins/withAllowBackupFix.js"
+      "./plugins/withNotificationListener.js"
     ]
   }
 }
