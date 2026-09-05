@@ -48,6 +48,35 @@ function buildDisplayText(
 }
 
 /**
+ * Known non-message "system"/status notifications posted by messaging apps'
+ * own background services — sync progress, connection status, backup, etc.
+ * These are never something a real contact sent, but there's no reliable
+ * "this is a system notification" flag exposed by the listener library, so
+ * this is a maintained list: add more exact phrases here as you spot them
+ * slipping through for Viber, SMS, or any other source.
+ */
+const SYSTEM_NOTICE_PATTERNS: RegExp[] = [
+  /retrieving (recent )?messages/i,
+  /backing up messages?/i,
+  /restoring (from )?backup/i,
+  /syncing messages?/i,
+  /connecting\.{0,3}$/i,
+  /waiting for network/i,
+  /verifying (your )?number/i,
+  /setting up (your )?account/i,
+  /downloading messages?/i,
+  /sending\.{0,3}$/i,
+  /message queued/i,
+  /no sim card/i,
+];
+
+function isSystemNotice(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return SYSTEM_NOTICE_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+/**
  * Identity key used for duplicate detection. Prefers the OS-assigned
  * notification key (`StatusBarNotification.key`) when the listener surfaces
  * it — that's the most reliable signal, since Android reuses it for
@@ -197,13 +226,24 @@ export async function handleIncomingNotification(payload: {
       const gmText = gm.text || "";
       if (!gmText) continue;
       if (isConversationSubtitleArtifact(gmTitle, gmText)) continue;
+      if (isSystemNotice(gmText)) continue;
 
       // Permanent (non-expiring) dedup: the OS reposts the SAME cumulative
       // bundle every time a new message arrives in the conversation, so a
       // message seen 5 minutes ago must still be recognized as already
       // forwarded — the short dedup window used below would let it through
       // again as soon as it expired.
-      const groupKey = `g:${raw.app}::${raw.key ?? "nokey"}::${gmTitle}::${gmText}`;
+      //
+      // Deliberately does NOT include raw.key: when a new message lands in
+      // ANY conversation, Android also (re)posts a group-summary
+      // notification bundling recent messages across ALL open
+      // conversations for this app — same content, but a different
+      // notification key than the original per-conversation post. Keying
+      // off raw.key made that summary repost look "new" and re-forwarded
+      // every earlier message every time a different person sent one. The
+      // message's own content (app + sender + text) is the real identity
+      // here, regardless of which notification object delivered it.
+      const groupKey = `g:${raw.app}::${gmTitle}::${gmText}`;
       if (!claimGroupMessageKey(groupKey)) continue;
 
       queueMessage(gmTitle, gmText);
@@ -234,6 +274,12 @@ export async function handleIncomingNotification(payload: {
 
   // Same conversation-subtitle artifact as above, for the non-grouped path.
   if (isConversationSubtitleArtifact(rawTitle, rawText)) {
+    return;
+  }
+
+  // System/status notices (Viber sync messages, SMS delivery status, etc.)
+  // are not real chat content — drop them before they're ever queued.
+  if (isSystemNotice(rawText)) {
     return;
   }
 

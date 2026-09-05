@@ -236,6 +236,25 @@ class RelayForegroundService : Service() {
         return START_STICKY
     }
 
+    // Swiping the app away from Recent Apps calls this even though the
+    // service is ongoing/foreground and never bound to the Activity. Plain
+    // Android leaves the service running regardless, but several OEM
+    // launchers (Xiaomi/MIUI, Oppo/ColorOS, Vivo, etc.) use this exact
+    // callback as a hook to aggressively kill the whole process anyway,
+    // taking the persistent notification down with it. Immediately asking
+    // to restart closes that gap — the notification should now only go away
+    // when the user genuinely force-stops the app from system Settings.
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        val restartIntent = Intent(applicationContext, RelayForegroundService::class.java)
+        restartIntent.setPackage(packageName)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            applicationContext.startForegroundService(restartIntent)
+        } else {
+            applicationContext.startService(restartIntent)
+        }
+    }
+
     private fun createChannelIfNeeded() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
